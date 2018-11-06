@@ -1,17 +1,29 @@
 local ANY = -1
-local IPPROTO_UDP = 17
-local IPPROTO_TCP = 6
+local MAX_FILTER_COUNT = 5
+
+-- Взято из https://stackoverflow.com/questions/8200228/how-can-i-convert-an-ip-address-into-an-integer-with-lua
+local ip2dec = function(ip) local i, dec = 3, 0; for d in string.gmatch(ip, "%d+") do dec = dec + 2 ^ (8 * i) * d; i = i - 1 end; return dec end
 
 local filter_to_defines = function(args)
   local num = args.filter_num
   local defines = {}
 
   if args.enabled == 1 then
-    defines["FILTER" .. num .. "_IPPROTO"]  = tonumber(args.ipproto)
-    defines["FILTER" .. num .. "_SRC_IP"]   = tonumber(args.src_ip)
-    defines["FILTER" .. num .. "_DST_IP"]   = tonumber(args.dst_ip)
-    defines["FILTER" .. num .. "_SRC_PORT"] = tonumber(args.src_port)
-    defines["FILTER" .. num .. "_DST_PORT"] = tonumber(args.dst_port)
+    local src_ip = ANY
+    local dst_ip = ANY
+
+    if args.src_ip ~= ANY then
+      src_ip = ip2dec(args.src_ip)
+    end
+    if args.dst_ip ~= ANY then
+      dst_ip = ip2dec(args.dst_ip)
+    end
+
+    defines["FILTER" .. num .. "_IPPROTO"]  = tonumber(args.ipproto or ANY)
+    defines["FILTER" .. num .. "_SRC_IP"]   = src_ip
+    defines["FILTER" .. num .. "_DST_IP"]   = dst_ip
+    defines["FILTER" .. num .. "_SRC_PORT"] = tonumber(args.src_port or ANY)
+    defines["FILTER" .. num .. "_DST_PORT"] = tonumber(args.dst_port or ANY)
     defines["FILTER" .. num .. "_ENABLED"]  = 1
   else
     defines["FILTER" .. num .. "_ENABLED"]  = 0
@@ -70,10 +82,6 @@ local get_ifstat_data = function(bpf, filters)
   return ifstat_data
 end
 
--- Взято из https://stackoverflow.com/questions/8200228/how-can-i-convert-an-ip-address-into-an-integer-with-lua
-local ip2dec = function(ip) local i, dec = 3, 0; for d in string.gmatch(ip, "%d+") do dec = dec + 2 ^ (8 * i) * d; i = i - 1 end; return dec end
-local dec2ip = function(decip) local divisor, quotient, ip; for i = 3, 0, -1 do divisor = 2 ^ (i * 8); quotient, decip = math.floor(decip / divisor), math.fmod(decip, divisor); if nil == ip then ip = quotient else ip = ip .. "." .. quotient end end return ip end
-
 local inject_ifstat_bpf = function(BPF, iface, filters)
   local defines = filters_to_defines(filters)
   defines["ANY"] = ANY
@@ -87,13 +95,14 @@ local inject_ifstat_bpf = function(BPF, iface, filters)
 end
 
 local parse_config = function()
-  return { ["delay_ms"] = 500, ["iface"] = "enp0s8", ["filters"] = {
-    {enabled=1, filter_num=0, ipproto=ANY, src_ip=ANY, dst_ip=ANY, src_port=ANY, dst_port=ANY},
-    {enabled=0, filter_num=1, ipproto=ANY, src_ip=ANY, dst_ip=ANY, src_port=ANY, dst_port=ANY},
-    {enabled=0, filter_num=2, ipproto=ANY, src_ip=ANY, dst_ip=ANY, src_port=ANY, dst_port=ANY},
-    {enabled=0, filter_num=3, ipproto=ANY, src_ip=ANY, dst_ip=ANY, src_port=ANY, dst_port=ANY},
-    {enabled=0, filter_num=4, ipproto=ANY, src_ip=ANY, dst_ip=ANY, src_port=ANY, dst_port=ANY}
-  }}
+  local config = require "config"
+  local filters_count = #config["filters"]
+  if filters_count > MAX_FILTER_COUNT then
+    error("ERROR: Max allowed amount of filters: %d" % (filters_count))
+  elseif filters_count <= 0 then
+    error("ERROR: Please fill config (#TODO)")
+  end
+  return config
 end
 
 local ubus_objects = { ifstat = {} }
