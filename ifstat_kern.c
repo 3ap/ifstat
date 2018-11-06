@@ -144,9 +144,9 @@ static inline void parse_ipv4(void *packet, void *packet_end) {
   struct pkt_info info;
   struct pkt_info *pkt = &info;
 
-  if (((void *)iph  > packet_end) ||
-      ((void *)udph > packet_end) ||
-      ((void *)tcph > packet_end))
+  if (((void *)&iph[1]  > packet_end) ||
+      ((void *)&udph[1] > packet_end) ||
+      ((void *)&tcph[1] > packet_end))
     return;
 
   pkt->ipproto = iph->protocol;
