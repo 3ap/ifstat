@@ -1,3 +1,8 @@
+#!/usr/bin/env luajit
+
+require "ubus"
+require "uloop"
+
 local ANY = -1
 local MAX_FILTER_COUNT = 5
 
@@ -52,7 +57,7 @@ local defines_to_cflags = function(filters)
   return cflags
 end
 
-local get_ifstat_data = function(bpf, filters)
+local serialize_ifstat_data = function(bpf, filters)
   local ifstat_data = {}
 
   local filter_data_columns = {
@@ -89,7 +94,6 @@ local inject_ifstat_bpf = function(BPF, iface, filters)
   local cflags = defines_to_cflags(defines)
   local bpf = BPF:new{src_file="ifstat_kern.c", debug=0, cflags=cflags}
   bpf:attach_xdp{device=iface, fn_name="packet_handler"}
-  -- TODO: error check
 
   return bpf
 end
@@ -107,24 +111,25 @@ end
 
 local ubus_objects = { ifstat = {} }
 
-return function(BPF)
-  local config  = parse_config()
+local main_loop = function(BPF, config)
+  local conn    = ubus.connect()
 
   local iface   = config["iface"]
   local filters = config["filters"]
   local delay   = config["delay_ms"]
 
-  local conn = ubus.connect()
   if not conn then
     error("Failed to connect to ubus")
   end
+  log.info("Connected to ubus")
   conn:add(ubus_objects)
 
-  local bpf = inject_ifstat_bpf(BPF, iface, filters)
+  local ifstat = inject_ifstat_bpf(BPF, iface, filters)
+  log.info("eBPF/XDP injected to iface \"%s\"" % { iface })
 
   local timer
   local publish = function()
-    local data = get_ifstat_data(bpf, filters)
+    local data = serialize_ifstat_data(ifstat, filters)
     conn:notify(ubus_objects.ifstat.__ubusobj, "ifstat.data", data)
     timer:set(delay)
   end
@@ -132,5 +137,30 @@ return function(BPF)
   uloop.init()
   timer = uloop.timer(publish)
   timer:set(delay)
+  log.info("Ubus data publish rate set to %d ms" % { delay })
+
   uloop.run()
+
+  return 0
 end
+
+function main()
+  local str = require("debug").getinfo(1, "S").source:sub(2)
+  local script_path = str:match("(.*/)").."/?.lua;"
+  package.path = "bcc/src/lua/"..script_path..package.path
+  require("bcc.vendor.helpers")
+
+  local BPF = require("bcc.bpf")
+  local config = parse_config()
+
+  log.enabled = true
+  local res, err = xpcall(main_loop, debug.traceback, BPF, config)
+  if not res then
+    io.stderr:write("[ERROR] "..err.."\n")
+  end
+
+  -- TODO: Код ниже выполняется при SIGINT
+  BPF.cleanup()
+end
+
+main()
