@@ -105,7 +105,7 @@ end
 function main()
   uloop.init()
 
-  local conn = ubus.connect()
+  local conn = ubus.connect(os.getenv("UBUS_SOCK"))
   if not conn then
     error("Failed to connect to ubus")
   end

@@ -124,7 +124,7 @@ end
 local ubus_objects = { ifstat = {} }
 
 local main_loop = function(BPF, config)
-  local conn    = ubus.connect()
+  local conn    = ubus.connect(os.getenv("UBUS_SOCK"))
 
   local iface   = config["iface"]
   local filters = config["filters"]
