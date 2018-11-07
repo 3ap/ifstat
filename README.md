@@ -9,16 +9,10 @@ ifstat
 
 ## Зависимости
 
-  - актуальное ядро Linux с поддержкой eBPF и XDP (4.4+ должно подойти);
-
-  - запущенный ubusd, установленные libubus (скомпиленный с
-    поддержкой lua) и libuloop;
-
-  - LLVM/Clang, luajit (устанавливаются из репозитория);
-
-  - libbcc (может быть собрано в виде deb-пакета из репозитория);
-
-  - tcpreplay (для тестов)
+  - актуальное ядро Linux с поддержкой eBPF и XDP (проверено на 4.18);
+  - ubox и ubus с поддержкой Lua;
+  - luajit;
+  - libbcc.
 
 ## TODO
 
@@ -26,20 +20,42 @@ ifstat
      виртуального сетевого интерфейса и валидацией полученной
      статистики;
 
-  2. Написать инструкцию/скрипт с точностью до команд, с информацией
-     о том, как установить все необходимые зависимости для Debian;
-
-  3. Провести ручное нагрузочное тестирование на реальном железе с
+  2. Провести ручное нагрузочное тестирование на реальном железе с
      Debian и посмотреть на производительность;
 
-  4. Перейти с lua-based конфига на что-то, что можно адекватно
+  3. Перейти с lua-based конфига на что-то, что можно адекватно
      валидировать (ini/yaml/toml).
+
+## Установка
+
+Целевая система: Debian 9 (stretch), amd64
+Процесс установки проверен вручную с помощью Vagrant (образ `debian/stretch64`)
+
+```shell
+echo "deb http://deb.debian.org/debian stretch-backports main contrib non-free" | sudo tee /etc/apt/sources.list.d/backports.list && \
+sudo apt-get update && \
+sudo apt-get install -y linux-image-4.18.0-0.bpo.1-amd64 \
+                     linux-headers-4.18.0-0.bpo.1-amd64 \
+                     linux-compiler-gcc-6-x86=4.18.6-1~bpo9+1 \
+                     luajit libjson-c3 git && \
+wget http://tmp.nazaryev.ru/ifstat/{libbcc_0.7.0-1_all.deb,ubox-0.1.1-Linux.deb,ubus-0.1.1-Linux.deb} && \
+sudo dpkg -i libbcc_0.7.0-1_all.deb ubox-0.1.1-Linux.deb ubus-0.1.1-Linux.deb && \
+rm -f libbcc_0.7.0-1_all.deb ubox-0.1.1-Linux.deb ubus-0.1.1-Linux.deb && \
+git clone https://github.com/3ap/ifstat && cd ifstat && \
+git submodule init && \
+git submodule update
+
+sudo reboot # для перехода на новую версию ядра
+```
 
 ## Запуск и конфигурация
 
 ```shell
-sudo ./ifstatd.lua # сервер (компиляция, инъекция eBPF, отправка)
-./ifstat.lua       # клиент (отображение статистики от сервера)
+cd ifstat
+vi config.lua      # настройка фильтров (формат см. ниже)
+sudo /usr/sbin/ubusd &
+sudo ./ifstatd.lua # запуск сервера (компиляция, инъекция eBPF, отправка)
+sudo ./ifstat.lua  # запуск клиента (отображение статистики от сервера)
 ```
 
 В качестве конфига используется находящийся рядом с `ifstatd.lua`
