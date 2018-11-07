@@ -3,8 +3,10 @@
 require "ubus"
 require "uloop"
 
-local ANY = -1
+local PROGNAME = "ifstatd"
+local VERSION = "2018.06.11"
 local MAX_FILTER_COUNT = 5
+local ANY = -1
 
 -- Взято из https://stackoverflow.com/questions/8200228/how-can-i-convert-an-ip-address-into-an-integer-with-lua
 local ip2dec = function(ip) local i, dec = 3, 0; for d in string.gmatch(ip, "%d+") do dec = dec + 2 ^ (8 * i) * d; i = i - 1 end; return dec end
@@ -88,6 +90,7 @@ local serialize_ifstat_data = function(bpf, filters)
         -- u32 по размеру именно в виде чисел, так что отправляем как
         -- строку
         ifstat_data[id][column] = tostring(sum)
+        log.debug(id .. " | " .. column .. " = " .. sum)
       end
     end
   end
@@ -98,6 +101,7 @@ end
 local inject_ifstat_bpf = function(BPF, iface, filters)
   local defines = filters_to_defines(filters)
   defines["ANY"] = ANY
+  if log.dbg then defines["DEBUG"] = 1 end
 
   local cflags = defines_to_cflags(defines)
   local bpf = BPF:new{src_file="ifstat_kern.c", debug=0, cflags=cflags}
@@ -110,9 +114,9 @@ local parse_config = function()
   local config = require "config"
   local filters_count = #config["filters"]
   if filters_count > MAX_FILTER_COUNT then
-    error("ERROR: Max allowed amount of filters: %d" % (filters_count))
+    error("Max allowed amount of filters: %d" % (filters_count))
   elseif filters_count <= 0 then
-    error("ERROR: Please fill config (#TODO)")
+    error("Please fill config (#TODO)")
   end
   return config
 end
@@ -144,12 +148,54 @@ local main_loop = function(BPF, config)
 
   uloop.init()
   timer = uloop.timer(publish)
-  timer:set(delay)
+  timer:set(1)
   log.info("Ubus data publish rate set to %d ms" % { delay })
 
   uloop.run()
 
   return 0
+end
+
+local function print_usage(file)
+  file:write(string.format(
+    "usage: %s [[--version|--debug|--quiet]] \n",
+    PROGNAME))
+end
+
+local function print_version()
+  local jit = require("jit")
+  print(string.format("%s %s -- Running on %s (%s/%s)",
+    PROGNAME, VERSION, jit.version, jit.os, jit.arch))
+end
+
+local function parse_cli()
+  -- Включаем отображение log'а по умолчанию
+  --   (см. bcc/src/lua/bcc/vendor/helpers.lua:228)
+  log.enabled = true
+
+  -- Расширяем log возможностью отправки debug-сообщений, которые
+  -- могут влиять на производительность программы
+  log.dbg = false
+  log.debug = function() end
+
+  while arg[1] and string.starts(arg[1], "-") do
+    local k = table.remove(arg, 1)
+    if k == "-q" or k == "--quiet" then
+      log.enabled = false
+    elseif k == "-d" or k == "--debug" then
+      log.dbg = true
+      log.debug = log.info
+    elseif k == "-v" or k == "--version" then
+      print_version()
+      os.exit(0)
+    elseif k == "-h" or k == "--help" then
+      print_usage(io.stdout)
+      os.exit(0)
+    else
+      print_usage(io.stderr)
+      os.exit(1)
+    end
+  end
 end
 
 function main()
@@ -158,10 +204,11 @@ function main()
   package.path = "bcc/src/lua/"..script_path..package.path
   require("bcc.vendor.helpers")
 
+  parse_cli()
+
   local BPF = require("bcc.bpf")
   local config = parse_config()
 
-  log.enabled = true
   local res, err = xpcall(main_loop, debug.traceback, BPF, config)
   if not res then
     io.stderr:write("[ERROR] "..err.."\n")
