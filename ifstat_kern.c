@@ -238,14 +238,14 @@ static inline void parse_ipv4(void *packet, void *packet_end) {
 #endif
 }
 
-int packet_handler(struct xdp_md *ctx) {
+int xdp_packet_handler(struct xdp_md *ctx) {
 // HACK: К сожалению, нельзя, чтобы bpf_trace_printk использовался в
 // макросах, из-за чего нет возможности избавиться от дублирования
 // проверки #ifdef DEBUG ... #endif везде
 // __FUNCTION__ тоже нельзя использовать :(
 
 #ifdef DEBUG
-  bpf_trace_printk("packet_handler called!\n");
+  bpf_trace_printk("xdp_packet_handler called!\n");
 #endif
 
   void* packet_end = (void*)(long)ctx->data_end;

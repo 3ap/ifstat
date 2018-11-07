@@ -105,7 +105,7 @@ local inject_ifstat_bpf = function(BPF, iface, filters)
 
   local cflags = defines_to_cflags(defines)
   local bpf = BPF:new{src_file="ifstat_kern.c", debug=0, cflags=cflags}
-  bpf:attach_xdp{device=iface, fn_name="packet_handler"}
+  bpf:attach_xdp{device=iface, fn_name="xdp_packet_handler"}
 
   return bpf
 end
