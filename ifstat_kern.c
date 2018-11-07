@@ -27,6 +27,21 @@ enum filter_data_bucket {
   BUCKET_LAST
 };
 
+static inline void print_ip(u32 ip) {
+  // HACK: warning: cannot use more than 3 conversion specifiers
+  bpf_trace_printk("  %d.%d.\n", (ip >> 24) & 0xFF, (ip >> 16) & 0xFF);
+  bpf_trace_printk("  %d.%d\n", (ip >> 8) & 0xFF, (ip & 0xFF));
+}
+
+static inline void print_filter_result(int num, int result) {
+#ifdef DEBUG
+  if(!result)
+    bpf_trace_printk("FILTER%d_CHECK ok\n", num);
+  else
+    bpf_trace_printk("FILTER%d_CHECK fail\n", num);
+#endif
+}
+
 static inline enum filter_data_bucket determine_bucket(u32 pkt_size) {
   if (pkt_size <= 64)
     return BUCKET_64_BYTES;
@@ -45,7 +60,12 @@ static inline enum filter_data_bucket determine_bucket(u32 pkt_size) {
 }
 
 static inline ptrdiff_t calc_packet_size(void *start, void *end) {
-  return (end - start);
+  // HACK: Валидатор ругается, если получить отрицательное значение в
+  // данной функции, поэтому добавляем проверку
+  if(end > start)
+    return (end - start);
+  else
+    return (start - end);
 }
 
 #define FILTER_BUCKET_VALUE_ADD_FUNC(NUM) \
@@ -133,18 +153,26 @@ static inline int filter ## NUM ## _check(struct pkt_info *pkt) { \
   } while(0);
 
 #define FILTER_PROCESS(NUM, PKT_INFO) \
-  if(!filter ## NUM ## _check(PKT_INFO)) \
-    FILTER_BUCKET_UPDATE(NUM, PKT_INFO);
+  do { \
+    int result = filter ## NUM ## _check(PKT_INFO); \
+    print_filter_result(NUM, result); \
+    if(!result) \
+      FILTER_BUCKET_UPDATE(NUM, PKT_INFO); \
+  } while(0);
 
 static inline void parse_ipv4(void *packet, void *packet_end) {
-  struct iphdr *iph = packet + sizeof(struct ethhdr);
-  struct tcphdr *tcph = packet + sizeof(struct ethhdr) + sizeof(struct iphdr);
-  struct udphdr *udph = packet + sizeof(struct ethhdr) + sizeof(struct iphdr);
+#ifdef DEBUG
+  bpf_trace_printk("parse_ipv4 called!\n");
+#endif
+
+  const struct iphdr *iph = packet + sizeof(struct ethhdr);
+  const struct tcphdr *tcph = packet + sizeof(struct ethhdr) + sizeof(struct iphdr);
+  const struct udphdr *udph = packet + sizeof(struct ethhdr) + sizeof(struct iphdr);
 
   struct pkt_info info;
   struct pkt_info *pkt = &info;
 
-  if (((void *)&iph[1]  > packet_end) ||
+  if (((void *)&iph[1] > packet_end) ||
       ((void *)&udph[1] > packet_end) ||
       ((void *)&tcph[1] > packet_end))
     return;
@@ -152,6 +180,10 @@ static inline void parse_ipv4(void *packet, void *packet_end) {
   pkt->ipproto = iph->protocol;
   if (pkt->ipproto != IPPROTO_TCP && pkt->ipproto != IPPROTO_UDP)
     return;
+
+#ifdef DEBUG
+  bpf_trace_printk("ipproto ok!\n");
+#endif
 
   pkt->pkt_size = calc_packet_size(packet, packet_end);
   pkt->src_ip = iph->saddr;
@@ -164,6 +196,26 @@ static inline void parse_ipv4(void *packet, void *packet_end) {
     pkt->src_port = udph->source;
     pkt->dst_port = udph->dest;
   }
+
+#ifdef DEBUG
+  bpf_trace_printk("pkt->src_ip = \n");
+  print_ip(ntohl(pkt->src_ip));
+  bpf_trace_printk("\n");
+
+  bpf_trace_printk("pkt->dst_ip = \n");
+  print_ip(ntohl(pkt->dst_ip));
+  bpf_trace_printk("\n");
+
+  bpf_trace_printk("pkt->src_port = %u\n", ntohs(pkt->src_port));
+  bpf_trace_printk("pkt->dst_port = %u\n", ntohs(pkt->dst_port));
+  bpf_trace_printk("pkt->pkt_size = %u\n", pkt->pkt_size);
+  bpf_trace_printk("iph->id = %u\n", ntohs(iph->id));
+#endif
+
+// Если FILTERx_ENABLED будет равен 0, то FILTER_PROCESS(X, ...)
+// выпилится ещё на этапе компиляции. Таким образом, выключенные
+// фильтры не будут запущены, что должно положительно влиять на
+// производительность
 
 #if FILTER0_ENABLED == 1
   FILTER_PROCESS(0, pkt);
@@ -187,6 +239,15 @@ static inline void parse_ipv4(void *packet, void *packet_end) {
 }
 
 int packet_handler(struct xdp_md *ctx) {
+// HACK: К сожалению, нельзя, чтобы bpf_trace_printk использовался в
+// макросах, из-за чего нет возможности избавиться от дублирования
+// проверки #ifdef DEBUG ... #endif везде
+// __FUNCTION__ тоже нельзя использовать :(
+
+#ifdef DEBUG
+  bpf_trace_printk("packet_handler called!\n");
+#endif
+
   void* packet_end = (void*)(long)ctx->data_end;
   void* packet = (void*)(long)ctx->data;
 
