@@ -71,7 +71,7 @@ static inline int filter ## NUM ## _check(struct pkt_info *pkt) { \
 
 #define FILTER_INIT(NUM) \
   static inline u64 * filter ## NUM ##_lookup(u32 bkt_num); \
-  BPF_ARRAY(filter ## NUM, u64, BUCKET_LAST); \
+  BPF_PERCPU_ARRAY(filter ## NUM, u64, BUCKET_LAST); \
   FILTER_CHECK_FUNC(NUM, FILTER ## NUM ## _SRC_PORT, \
                          FILTER ## NUM ## _DST_PORT, \
 			 FILTER ## NUM ## _SRC_IP, \

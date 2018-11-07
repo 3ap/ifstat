@@ -77,9 +77,17 @@ local serialize_ifstat_data = function(bpf, filters)
       local id = "filter" .. filter.filter_num
       local data = bpf:get_table(id)
       ifstat_data[id] = {}
-      for idx, value in data:items(true) do
-	local column = filter_data_columns[idx-1]
-        ifstat_data[id][column] = tonumber(value)
+      for idx, per_cpu_array in data:items(true) do
+        local column = filter_data_columns[idx-1]
+        local sum = 0
+        for cpu_num, value in ipairs(per_cpu_array) do
+          sum = sum + tonumber(value)
+        end
+
+        -- Судя по всему, по ubus не стоит передавать числа больше
+        -- u32 по размеру именно в виде чисел, так что отправляем как
+        -- строку
+        ifstat_data[id][column] = tostring(sum)
       end
     end
   end
